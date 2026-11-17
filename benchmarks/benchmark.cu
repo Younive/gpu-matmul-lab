@@ -3,8 +3,20 @@
 #include "../utils/cuda_utils.cuh"
 #include "../src/matmul_kernel.cuh"
 
-// allocate memory and initialize matrices
-void allocate_and_initialize(int M, int K, int N) {
+int main(int argc, char** argv) {
+
+    constexpr int REPEAT = 1000;
+
+    if (argc != 4) {
+        fprintf(stderr, "Usage: %s <M> <K> <N>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    int M = atoi(argv[1]);
+    int K = atoi(argv[2]);
+    int N = atoi(argv[3]);
+
+    // allocate and initialize matrices
     // allocate cpu memory
     size_t bytes_A = M * K * sizeof(float);
     size_t bytes_B = K * N * sizeof(float);
@@ -37,23 +49,6 @@ void allocate_and_initialize(int M, int K, int N) {
         (N + block.x - 1) / block.x,
         (M + block.y - 1) / block.y
     );
-}
-
-int main(int argc, char** argv) {
-
-    constexpr int REPEAT = 100;
-
-    if (argc != 4) {
-        fprintf(stderr, "Usage: %s <M> <K> <N>\n", argv[0]);
-        return EXIT_FAILURE;
-    }
-
-    int M = atoi(argv[1]);
-    int K = atoi(argv[2]);
-    int N = atoi(argv[3]);
-
-    // allocate and initialize matrices
-    allocate_and_initialize(M, K, N);
 
     // create CUDA events for timing
     cudaEvent_t start, stop;
@@ -87,6 +82,30 @@ int main(int argc, char** argv) {
 
     // --------------------------------
     // Benchmark 2: shared memory MatMul
+    // --------------------------------
+
+    // warm up the GPU
+    tiled_matmul<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    // benchmark tiled_matmul kernel
+    CUDA_CHECK(cudaEventRecord(start));
+    for (int i = 0; i < REPEAT; i++)
+        tiled_matmul<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
+
+    // record the stop event
+    CUDA_CHECK(cudaEventRecord(stop));
+    CUDA_CHECK(cudaEventSynchronize(stop));
+
+    milliseconds = 0;
+    CUDA_CHECK(cudaEventElapsedTime(&milliseconds, start, stop));
+    gflops = 2.0f * M * N * K / (milliseconds / 1000.0f) / 1e9f;
+    printf("Tiled MatMul - Average execution time: %f ms\n", milliseconds / REPEAT);
+    printf("Tiled MatMul - GFLOPS: %f\n", gflops);
+
+    // --------------------------------
+    // Benchmark 3: xxx MatMul
     // --------------------------------
 
     // clean up
