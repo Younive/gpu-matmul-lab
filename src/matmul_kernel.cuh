@@ -9,3 +9,11 @@ extern __global__ void naive_matmul(
     float* C,
     int M, int N, int K
 );
+
+// Tiled matrix multiplication using shared memory
+extern __global__ void tiled_matmul(
+    const float* A,
+    const float* B,
+    float* C,
+    int M, int N, int K
+);
