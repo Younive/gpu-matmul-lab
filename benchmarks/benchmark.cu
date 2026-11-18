@@ -1,11 +1,47 @@
 #include <cuda_runtime.h>
 #include <cstdio>
-#include "../utils/cuda_utils.cuh"
+#include <iostream>
+#include <string>
+#include <functional>
 #include "../src/matmul_kernel.cuh"
+#include "../utils/cuda_utils.cuh"
+
+void benchmark(
+    const std::string& name,
+    const std::function<void()>& kernel_func,
+    int M, int N, int K,
+    int repeat = 1000
+){
+    // warm up the GPU
+    for (int i = 0; i < 10; i++)
+        kernel_func();
+
+    cudaDeviceSynchronize();
+
+    // create CUDA events for timing
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    // benchmark the kernel
+    cudaEventRecord(start);
+    for (int i = 0; i < repeat; i++)
+        kernel_func();
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    float gflops = 2.0f * M * N * K / (milliseconds / 1000.0f) / 1e9f;
+    printf("%s - Average execution time: %f ms\n", name.c_str(), milliseconds / repeat);
+    printf("%s - GFLOPS: %f\n", name.c_str(), gflops);
+
+    // clean up
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+}
 
 int main(int argc, char** argv) {
-
-    constexpr int REPEAT = 1000;
 
     if (argc != 4) {
         fprintf(stderr, "Usage: %s <M> <K> <N>\n", argv[0]);
@@ -43,79 +79,38 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaMemcpy(d_A, h_A, bytes_A, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_B, h_B, bytes_B, cudaMemcpyHostToDevice));
 
-    // set up execution configuration
-    dim3 block(16, 16);
-    dim3 grid(
-        (N + block.x - 1) / block.x,
-        (M + block.y - 1) / block.y
-    );
-
-    // create CUDA events for timing
-    cudaEvent_t start, stop;
-    CUDA_CHECK(cudaEventCreate(&start));
-    CUDA_CHECK(cudaEventCreate(&stop));
-
-    // --------------------------------
-    // Benchmark 1: Naive MatMul
-    // --------------------------------
-
-    // warm up the GPU
-    naive_matmul<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
-
-    // benchmark naive_matmul kernel
-    CUDA_CHECK(cudaEventRecord(start));
-
-    for (int i = 0; i < REPEAT; i++)
+    // benchmark naive matrix multiplication
+    benchmark("Naive MatMul", [&](){
+        dim3 block(16, 16);
+        dim3 grid((N + block.x - 1) / block.x, (M + block.y - 1) / block.y);
         naive_matmul<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
-    
-    // record the stop event
-    CUDA_CHECK(cudaEventRecord(stop));
-    CUDA_CHECK(cudaEventSynchronize(stop));
+    }, M, N, K);
 
-    float milliseconds = 0;
-    CUDA_CHECK(cudaEventElapsedTime(&milliseconds, start, stop));
-    float gflops = 2.0f * M * N * K / (milliseconds / 1000.0f) / 1e9f;
-    printf("Naive MatMul - Average execution time: %f ms\n", milliseconds / REPEAT);
-    printf("Naive MatMul - GFLOPS: %f\n", gflops);
+    // benchmark tiled matrix multiplication
+    benchmark("Tiled MatMul", [&](){
+        int TILE = 4; 
+        dim3 block(TILE, TILE);
+        dim3 grid((N + TILE - 1) / TILE, (M + TILE - 1) / TILE);
+        tiled_matmul_launcher(d_A, d_B, d_C, M, N, K, TILE);
+    }, M, N, K);
 
-    // --------------------------------
-    // Benchmark 2: shared memory MatMul
-    // --------------------------------
-
-    // warm up the GPU
-    tiled_matmul<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
-
-    // benchmark tiled_matmul kernel
-    CUDA_CHECK(cudaEventRecord(start));
-    for (int i = 0; i < REPEAT; i++)
-        tiled_matmul<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
-
-    // record the stop event
-    CUDA_CHECK(cudaEventRecord(stop));
-    CUDA_CHECK(cudaEventSynchronize(stop));
-
-    milliseconds = 0;
-    CUDA_CHECK(cudaEventElapsedTime(&milliseconds, start, stop));
-    gflops = 2.0f * M * N * K / (milliseconds / 1000.0f) / 1e9f;
-    printf("Tiled MatMul - Average execution time: %f ms\n", milliseconds / REPEAT);
-    printf("Tiled MatMul - GFLOPS: %f\n", gflops);
-
-    // --------------------------------
-    // Benchmark 3: xxx MatMul
-    // --------------------------------
-
-    // clean up
-    CUDA_CHECK(cudaEventDestroy(start));
-    CUDA_CHECK(cudaEventDestroy(stop));
+    // benchmark register tiled matrix multiplication
+    benchmark("Register Tiled MatMul", [&](){
+        int TILE = 32;
+        int ROWS_PER_THREAD = 2;
+        int COLS_PER_THREAD = 2;
+        regtile_matmul_launcher(d_A, d_B, d_C, M, N, K, TILE, ROWS_PER_THREAD, COLS_PER_THREAD);
+    }, M, N, K);
 
     // free gpu memory
     CUDA_CHECK(cudaFree(d_A));
     CUDA_CHECK(cudaFree(d_B));
     CUDA_CHECK(cudaFree(d_C));
+
+    // free cpu memory
+    free(h_A);
+    free(h_B);
+    free(h_C);
 
     return EXIT_SUCCESS;
 }
