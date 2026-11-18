@@ -1,7 +1,7 @@
 #include "../utils/cuda_utils.cuh"
 #include "matmul_kernel.cuh"
 
-#define TILE 64
+template<int TILE>
 
 __global__ void tiled_matmul(const float* A, const float* B, float* C, int M, int N, int K){
     // allocate shared memory for tiles of A and B
@@ -41,5 +41,34 @@ __global__ void tiled_matmul(const float* A, const float* B, float* C, int M, in
     // write the result to C if within bounds
     if (row < M && col < N)
         C[row * N + col] = sum;
+}
 
+// host function to launch the tiled_matmul kernel
+void tiled_matmul_launcher(
+    const float* A,
+    const float* B,
+    float* C,
+    int M, int N, int K,
+    int TILE
+) {
+    if (TILE == 16) {
+        dim3 block(16, 16);
+        dim3 grid(
+            (N + 15) / 16,
+            (M + 15) / 16
+        );
+
+        tiled_matmul<16>
+            <<<grid, block>>>(A, B, C, M, N, K);
+    }
+    else if (TILE == 32) {
+        dim3 block(32, 32);
+        dim3 grid(
+            (N + 31) / 32,
+            (M + 31) / 32
+        );
+
+        tiled_matmul<32>
+            <<<grid, block>>>(A, B, C, M, N, K);
+    }
 }
