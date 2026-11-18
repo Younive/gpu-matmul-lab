@@ -1,7 +1,7 @@
 #include "../utils/cuda_utils.cuh"
 #include "matmul_kernel.cuh"
 
-extern __global__ void naive_matmul(const float* A, const float* B, float* C, int M, int N, int K){
+__global__ void naive_matmul(const float* A, const float* B, float* C, int M, int N, int K){
     // Calculate the row index of the C element and A
     int row = blockIdx.y * blockDim.y + threadIdx.y; // Calculate the column index of C and B
     int col = blockIdx.x * blockDim.x + threadIdx.x; // Calculate the row index of the C element and A
