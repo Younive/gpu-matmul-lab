@@ -30,6 +30,8 @@ extern __global__ void regtile_matmul(
     int COLS_PER_THREAD
 );
 
+extern __global__ void warp_optimized_matmul(const float* A, const float* B, float* C, int M, int N, int K);
+
 // Host function declarations for launching the kernels
 void tiled_matmul_launcher(
     const float* A,
@@ -48,4 +50,14 @@ void regtile_matmul_launcher(
     int TILE,
     int ROWS_PER_THREAD,
     int COLS_PER_THREAD
+);
+
+void warp_optimized_matmul_launcher(
+    const float* A,
+    const float* B,
+    float* C,
+    int M, int N, int K,
+    int WARP_SIZE, 
+    int ROWS_PER_WARP,
+    int WARPS_PER_BLOCK
 );
