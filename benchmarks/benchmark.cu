@@ -11,34 +11,48 @@ void benchmark(
     const std::function<void()>& kernel_func,
     int M, int N, int K,
     int repeat = 1000
-){
-    // warm up the GPU
-    for (int i = 0; i < 10; i++)
+) {
+    // Warmup
+    for (int i = 0; i < 10; i++) {
         kernel_func();
+    }
 
-    cudaDeviceSynchronize();
+    CUDA_CHECK(cudaDeviceSynchronize());
 
-    // create CUDA events for timing
     cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
+    CUDA_CHECK(cudaEventCreate(&start));
+    CUDA_CHECK(cudaEventCreate(&stop));
 
-    // benchmark the kernel
-    cudaEventRecord(start);
-    for (int i = 0; i < repeat; i++)
+    // Timing
+    CUDA_CHECK(cudaEventRecord(start));
+
+    for (int i = 0; i < repeat; i++) {
         kernel_func();
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
+    }
 
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    float gflops = 2.0f * M * N * K / (milliseconds / 1000.0f) / 1e9f;
-    printf("%s - Average execution time: %f ms\n", name.c_str(), milliseconds / repeat);
-    printf("%s - GFLOPS: %f\n", name.c_str(), gflops);
+    CUDA_CHECK(cudaEventRecord(stop));
+    CUDA_CHECK(cudaEventSynchronize(stop));
 
-    // clean up
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
+    float milliseconds = 0.0f;
+
+    CUDA_CHECK(
+        cudaEventElapsedTime(&milliseconds, start, stop)
+    );
+
+    float avg_ms = milliseconds / repeat;
+
+    double gflops =
+        (2.0 * M * N * K) /
+        (avg_ms / 1000.0) / 1e9;
+
+    printf("%s - Average execution time: %.6f ms\n",
+           name.c_str(), avg_ms);
+
+    printf("%s - GFLOP/s: %.3f\n",
+           name.c_str(), gflops);
+
+    CUDA_CHECK(cudaEventDestroy(start));
+    CUDA_CHECK(cudaEventDestroy(stop));
 }
 
 int main(int argc, char** argv) {
@@ -88,7 +102,7 @@ int main(int argc, char** argv) {
 
     // benchmark tiled matrix multiplication
     benchmark("Tiled MatMul", [&](){
-        int TILE = 4; 
+        int TILE = 32; 
         dim3 block(TILE, TILE);
         dim3 grid((N + TILE - 1) / TILE, (M + TILE - 1) / TILE);
         tiled_matmul_launcher(d_A, d_B, d_C, M, N, K, TILE);
@@ -100,6 +114,14 @@ int main(int argc, char** argv) {
         int ROWS_PER_THREAD = 2;
         int COLS_PER_THREAD = 2;
         regtile_matmul_launcher(d_A, d_B, d_C, M, N, K, TILE, ROWS_PER_THREAD, COLS_PER_THREAD);
+    }, M, N, K);
+
+    // benchmark warp-optimized matrix multiplication
+    benchmark("Warp-opimized MatMul", [&](){
+        int WARP_SIZE = 32;
+        int ROWS_PER_WARP = 16;
+        int WARPS_PER_BLOCK = 16;
+        warp_optimized_matmul_launcher(d_A, d_B, d_C, M, N, K, WARP_SIZE, ROWS_PER_WARP, WARPS_PER_BLOCK);
     }, M, N, K);
 
     // free gpu memory
