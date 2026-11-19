@@ -1,5 +1,6 @@
 #include "../utils/cuda_utils.cuh"
 #include "matmul_kernel.cuh"
+#include <stdexcept>
 
 template<int TILE>
 
@@ -44,31 +45,46 @@ __global__ void tiled_matmul(const float* A, const float* B, float* C, int M, in
 }
 
 // host function to launch the tiled_matmul kernel
+template<int TILE>
+void launch_tiled(
+    const float* A,
+    const float* B,
+    float* C,
+    int M,
+    int N,
+    int K
+) {
+    dim3 block(TILE, TILE);
+
+    dim3 grid(
+        (N + TILE - 1) / TILE,
+        (M + TILE - 1) / TILE
+    );
+
+    tiled_matmul<TILE>
+        <<<grid, block>>>(A, B, C, M, N, K);
+
+    CUDA_CHECK(cudaGetLastError());
+}
+
 void tiled_matmul_launcher(
     const float* A,
     const float* B,
     float* C,
-    int M, int N, int K,
+    int M,
+    int N,
+    int K,
     int TILE
 ) {
     if (TILE == 16) {
-        dim3 block(16, 16);
-        dim3 grid(
-            (N + 15) / 16,
-            (M + 15) / 16
-        );
-
-        tiled_matmul<16>
-            <<<grid, block>>>(A, B, C, M, N, K);
+        launch_tiled<16>(A, B, C, M, N, K);
     }
     else if (TILE == 32) {
-        dim3 block(32, 32);
-        dim3 grid(
-            (N + 31) / 32,
-            (M + 31) / 32
+        launch_tiled<32>(A, B, C, M, N, K);
+    }
+    else {
+        throw std::invalid_argument(
+            "Unsupported TILE configuration"
         );
-
-        tiled_matmul<32>
-            <<<grid, block>>>(A, B, C, M, N, K);
     }
 }
